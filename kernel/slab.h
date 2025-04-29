@@ -2,10 +2,27 @@
 
 #include "spinlock.h"
 #include "types.h"
+#include "param.h"
+#include "list.h"
 
-// struct run {
-//   struct run *next;
-// };
+struct run {
+  struct run *next;
+};
+
+/*
+ * struct slab memory layout
+ *
+ * bytes - field
+ *    16 - slab_list
+ *     2 - used_objects    ---+---(align)
+ *     2 - freelist_offset ---|
+ *     4 - object_size     ---|
+ * +) --------------------------
+ *    24 - total
+ *
+ * slab struct bonus: 24 / 8 = 3 <= 3
+ *
+ */
 
 /**
  * struct slab - Represents a slab in the slab allocator.
@@ -13,17 +30,32 @@
  */
 struct slab
 {
-  // TODO: Choose the type of freelist from
-  //    1. void **
-  //    2. struct run *
-  // <ptr> freelist;             // Linked list of free objects
-
-  // TODO: Design how to link the slabs
-  // ...
-
-  // TODO: you can add other members
-  // ...
+  struct list_head slab_list;
+  uint16 used_objects;
+  uint16 freelist_offset;
+  uint object_size;
 };
+
+/*
+ * struct kmem_cache memory layout
+ *
+ * bytes - field
+ *    16 - name
+ *     4 - lock.locked     ---+---(align)---+---(lock)
+ *     2 - used_objects    ---|             |
+ *     2 - freelist_offset ---|             |
+ *     8 - lock.name       -----------------|
+ *     8 - lock.cpu        -----------------|
+ *    16 - slab_list
+ *     4 - object_size     ---+---(align)
+ *     4 - avail_slabs     ---|
+ * +) --------------------------
+ *    64 - total
+ *
+ * in-cache slab size: 4032 bytes
+ * # of file structure in cache: 4032 // 504 = 8 :)
+ *
+ */
 
 /**
  * struct kmem_cache - Represents a cache of slabs.
@@ -33,14 +65,19 @@ struct slab
  */
 struct kmem_cache
 {
-  char name[32];        // Cache name (e.g., "file")
-  uint object_size;     // Size of a single object
-  struct spinlock lock; // Lock for cache management
+  char name[MP2_CACHE_MAX_NAME];
+  union {
+    struct {
+      uint _;
+      uint16 used_objects;
+      uint16 freelist_offset;
+    };
+    struct spinlock lock;
+  };
 
-  // TODO: Add slab list(s)
-  // <TYPE> full     // Completely allocated slabs (Optional)
-  // <TYPE> partial  // Partially allocated slabs
-  // <TYPE> free     // Free slabs (Optional)
+  struct list_head slab_list;  // Partially allocated slabs
+  uint object_size;     // Size of a single object
+  uint avail_slabs;
 };
 
 /**
