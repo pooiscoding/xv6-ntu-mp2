@@ -13,6 +13,7 @@
 #include "stat.h"
 #include "proc.h"
 #include "debug.h"
+#include "slab.h"
 
 void fileprint_metadata(void *f) {
   struct file *file = (struct file *) f;
@@ -21,48 +22,42 @@ void fileprint_metadata(void *f) {
 }
 
 struct devsw devsw[NDEV];
-struct {
-  struct spinlock lock;
-  struct file file[NFILE];
-} ftable;
 
 struct kmem_cache *file_cache;
 
 void
 fileinit(void)
 {
-  debug("[FILE] fileinit\n"); // example of using debug, you can modify this
-  initlock(&ftable.lock, "ftable");
+  // debug("[FILE] fileinit\n"); // example of using debug, you can modify this
+  file_cache = kmem_cache_create("file", sizeof(struct file));
 }
 
 // Allocate a file structure.
 struct file*
 filealloc(void)
 {
-  debug("[FILE] filealloc\n"); // example of using debug, you can modify this
+  // debug("[FILE] filealloc\n"); // example of using debug, you can modify this
   struct file *f;
 
-  acquire(&ftable.lock);
-  for(f = ftable.file; f < ftable.file + NFILE; f++){
-    if(f->ref == 0){
-      f->ref = 1;
-      release(&ftable.lock);
-      return f;
-    }
-  }
-  release(&ftable.lock);
-  return 0;
+  f = (struct file *) kmem_cache_alloc(file_cache);
+
+  acquire(&file_cache->lock);
+  f->ref = 1;
+  release(&file_cache->lock);
+  
+  return f;
 }
 
 // Increment ref count for file f.
 struct file*
 filedup(struct file *f)
 {
-  acquire(&ftable.lock);
+  acquire(&file_cache->lock);
   if(f->ref < 1)
     panic("filedup");
   f->ref++;
-  release(&ftable.lock);
+  release(&file_cache->lock);
+
   return f;
 }
 
@@ -72,18 +67,20 @@ fileclose(struct file *f)
 {
   struct file ff;
 
-  acquire(&ftable.lock);
+  acquire(&file_cache->lock);
   if(f->ref < 1)
     panic("fileclose");
   if(--f->ref > 0){
-    release(&ftable.lock);
+    release(&file_cache->lock);
     return;
   }
-  debug("[FILE] fileclose\n"); // example of using debug, you can modify this
+  // debug("[FILE] fileclose\n"); // example of using debug, you can modify this
   ff = *f;
   f->ref = 0;
   f->type = FD_NONE;
-  release(&ftable.lock);
+  release(&file_cache->lock);
+
+  kmem_cache_free(file_cache, f);
 
   if(ff.type == FD_PIPE){
     pipeclose(ff.pipe, ff.writable);

@@ -23,3 +23,4 @@
 
 /* MP2 */
 #define SYS_debugswitch 22 // switch debug mode
+#define SYS_printfslab 23
